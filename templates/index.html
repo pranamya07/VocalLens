@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vocal Lens - AI Photo Organizer</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">🎤 Vocal Lens</div>
+            <div class="voice-controls">
+                <button class="mic-btn" id="micBtn" title="Click and speak your command">🎤</button>
+                <input type="text" id="searchInput" placeholder="Ask me anything... e.g., 'Show me my sister's wedding photos'">
+                <button id="searchBtn">Search</button>
+                <button id="themeToggle">🌓 Dark Mode</button>
+            </div>
+        </header>
+
+        <!-- AI Chat Box - Shows AI's messages and questions -->
+        <div class="ai-chat-box" id="aiChatBox"></div>
+
+        <!-- AI Reasoning Panel - Shows AI's thinking process -->
+        <div class="ai-reasoning hidden" id="aiReasoning">
+            <h3>🧠 AI Thinking:</h3>
+        </div>
+
+        <!-- Interactive Area - For photo selection, confirmation etc -->
+        <div id="interactiveArea"></div>
+
+        <!-- Loading Spinner -->
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+        </div>
+
+        <!-- Results Area -->
+        <div id="result"></div>
+    </div>
+
+    <!-- Voice Integration Script - MUST LOAD FIRST -->
+    <script src="/static/js/voice-integration.js"></script>
+    <!-- Main Application Script -->
+    <script src="/static/js/script.js"></script>
+</body>
+</html>
