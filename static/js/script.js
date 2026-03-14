@@ -1,510 +1,423 @@
 // static/js/script.js
-/**
- * VOCAL LENS - MAIN APPLICATION SCRIPT
- * Handles UI, API calls, and integrates with voice layer
- */
 
-// ==================== STATE MANAGEMENT ====================
 const AppState = {
     currentQuery: null,
     conversationHistory: [],
-    pendingQuestions: [],
     selectedPhotos: new Set(),
-    userPreferences: {},
-    darkMode: false,
-    currentContext: null
+    currentContext: null,
+    darkMode: false
 };
 
-// ==================== DOM ELEMENTS ====================
 const elements = {
+    landingPage: document.getElementById('landingPage'),
+    resultsPage: document.getElementById('resultsPage'),
     micBtn: document.getElementById('micBtn'),
+    micBtnResults: document.getElementById('micBtnResults'),
     searchInput: document.getElementById('searchInput'),
+    searchInputResults: document.getElementById('searchInputResults'),
     searchBtn: document.getElementById('searchBtn'),
     themeToggle: document.getElementById('themeToggle'),
     resultDiv: document.getElementById('result'),
     loadingDiv: document.getElementById('loading'),
     aiChatBox: document.getElementById('aiChatBox'),
     aiReasoning: document.getElementById('aiReasoning'),
-    interactiveArea: document.getElementById('interactiveArea')
+    interactiveArea: document.getElementById('interactiveArea'),
+    photosLabel: document.getElementById('photosLabel')
 };
 
-// ==================== VOICE INTEGRATION ====================
 let voiceIntegration;
 let voiceProcessor;
+let activeMicBtn = null;
 
-// ==================== AI INTERACTION CLASS ====================
-class AIInteraction {
-    // Add message from AI to chat box
-    static addAIMessage(message, type = 'info') {
-        const chatBox = elements.aiChatBox;
-        if (!chatBox) return;
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `ai-message ${type}`;
-        messageDiv.innerHTML = `
-            <span class="ai-icon">🤖</span>
-            <p>${message}</p>
-        `;
-        
-        chatBox.appendChild(messageDiv);
-        chatBox.scrollTop = chatBox.scrollHeight;
+// ===================== LIGHTBOX =====================
+function openLightbox(url) {
+    const existing = document.getElementById('lightbox');
+    if (existing) existing.remove();
+
+    const lb = document.createElement('div');
+    lb.id = 'lightbox';
+    lb.style.cssText = `
+        position: fixed; inset: 0; z-index: 9999;
+        background: rgba(0,0,0,0.92);
+        display: flex; align-items: center; justify-content: center;
+        cursor: zoom-out;
+    `;
+    lb.innerHTML = `
+        <img src="${encodeURI(url)}" style="
+            max-width: 92vw; max-height: 92vh;
+            border-radius: 12px;
+            box-shadow: 0 8px 60px rgba(0,0,0,0.8);
+            object-fit: contain;
+        ">
+        <button onclick="document.getElementById('lightbox').remove()" style="
+            position: absolute; top: 20px; right: 28px;
+            background: none; border: none;
+            color: white; font-size: 36px;
+            cursor: pointer; line-height: 1;
+        ">✕</button>
+    `;
+    lb.addEventListener('click', (e) => {
+        if (e.target === lb) lb.remove();
+    });
+    document.body.appendChild(lb);
+}
+
+// ===================== PAGE NAVIGATION =====================
+function goToResults() {
+    elements.landingPage.classList.add('hidden');
+    elements.resultsPage.classList.remove('hidden');
+}
+
+function goBack() {
+    elements.resultsPage.classList.add('hidden');
+    elements.landingPage.classList.remove('hidden');
+    elements.searchInput.value = '';
+}
+
+function useHint(el) {
+    const text = el.textContent.replace(/['"]/g, '');
+    elements.searchInput.value = text;
+    elements.searchInput.focus();
+}
+
+// ===================== CHAT SYSTEM =====================
+class Chat {
+    static add(message, type = 'ai', subtype = 'info') {
+        const box = elements.aiChatBox;
+        if (!box) return;
+
+        const bubble = document.createElement('div');
+        bubble.className = `chat-bubble ${type === 'user' ? 'user' : subtype}`;
+
+        const avatar = document.createElement('div');
+        avatar.className = 'bubble-avatar';
+        avatar.textContent = type === 'user' ? 'U' : 'AI';
+
+        const content = document.createElement('div');
+        content.className = 'bubble-content';
+        content.textContent = message;
+
+        bubble.appendChild(avatar);
+        bubble.appendChild(content);
+        box.appendChild(bubble);
+        box.scrollTop = box.scrollHeight;
     }
-    
-    // Show AI's reasoning process
+
+    static addUser(message) { this.add(message, 'user'); }
+    static addAI(message, subtype = 'info') { this.add(message, 'ai', subtype); }
+
     static showReasoning(steps) {
-        const reasoningDiv = elements.aiReasoning;
-        if (!reasoningDiv || !steps || steps.length === 0) return;
-        
-        reasoningDiv.classList.remove('hidden');
-        reasoningDiv.innerHTML = '<h3>🧠 AI Thinking:</h3>';
-        
-        steps.forEach((step, index) => {
-            reasoningDiv.innerHTML += `
+        const div = elements.aiReasoning;
+        if (!div || !steps?.length) return;
+
+        div.classList.remove('hidden');
+        div.innerHTML = `
+            <div class="reasoning-title">
+                <div class="reasoning-dot"></div>
+                Thinking
+            </div>
+        `;
+        steps.forEach((step, i) => {
+            div.innerHTML += `
                 <div class="reasoning-step">
-                    <span class="step-number">${index + 1}</span>
-                    <span class="step-text">${step}</span>
+                    <span class="step-num">${i + 1}.</span>
+                    <span>${step}</span>
                 </div>
             `;
         });
     }
-    
-    // Show photo selection grid for identification
+
+    static hideReasoning() {
+        elements.aiReasoning.classList.add('hidden');
+        elements.aiReasoning.innerHTML = '';
+    }
+
+    static clear() {
+        elements.aiChatBox.innerHTML = '';
+        this.hideReasoning();
+        elements.interactiveArea.innerHTML = '';
+    }
+
     static showIdentificationGrid(photos, question) {
-        const area = elements.interactiveArea;
-        if (!area) return;
-        
-        this.addAIMessage(question, 'question');
-        
+        Chat.addAI(question, 'question');
+
         let html = '<div class="identification-grid">';
         photos.forEach(photo => {
             html += `
-                <div class="selectable-photo" onclick="AISelection.togglePhoto('${photo.id}')" id="photo-${photo.id}">
-                    <img src="${photo.url || '/static/samples/placeholder.jpg'}" alt="Selectable photo">
+                <div class="selectable-photo" onclick="Selection.toggle('${photo.id}')" id="photo-${photo.id}">
+                    <img src="${photo.url || '/static/samples/placeholder.jpg'}" alt="Photo">
                     <span class="checkmark">✓</span>
                 </div>
             `;
         });
-        html += `
-            <div style="grid-column: 1/-1; text-align: center; margin-top: 20px;">
-                <button onclick="AISelection.submitSelection()" class="btn btn-primary">
-                    Confirm Selection
-                </button>
-            </div>
-        </div>`;
-        
-        area.innerHTML = html;
+        html += `</div>
+            <button class="confirm-btn" onclick="Selection.submit()">Confirm Selection</button>`;
+        elements.interactiveArea.innerHTML = html;
         AppState.selectedPhotos.clear();
     }
-    
-    // Show confirmation after learning
+
     static showLearningConfirmation(person, count) {
-        this.addAIMessage(
-            `✅ I've learned to recognize your ${person}! Found ${count} photos with ${person}.`,
-            'success'
-        );
-        
-        // Offer next actions
+        Chat.addAI(`Learned: this is your ${person}. Found ${count} photos with them.`, 'success');
         elements.interactiveArea.innerHTML = `
-            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
-                <button onclick="createAlbum()" class="btn btn-success">
-                    ✨ Create Album Now
-                </button>
-                <button onclick="findMorePhotos()" class="btn btn-info">
-                    🔍 Find More Photos
-                </button>
+            <div class="next-actions">
+                <button class="action-btn" onclick="createAlbum()">Create album now</button>
+                <button class="action-btn" onclick="findMorePhotos()">Find more photos</button>
             </div>
         `;
     }
-    
-    // Clear AI chat
-    static clearChat() {
-        if (elements.aiChatBox) {
-            elements.aiChatBox.innerHTML = '';
-        }
-    }
-    
-    // Clear reasoning
-    static clearReasoning() {
-        if (elements.aiReasoning) {
-            elements.aiReasoning.classList.add('hidden');
-            elements.aiReasoning.innerHTML = '<h3>🧠 AI Thinking:</h3>';
-        }
-    }
-    
-    // Clear interactive area
-    static clearInteractive() {
-        if (elements.interactiveArea) {
-            elements.interactiveArea.innerHTML = '';
-        }
-    }
 }
 
-// ==================== AI SELECTION HANDLER ====================
-class AISelection {
-    static togglePhoto(photoId) {
-        const photoElement = document.getElementById(`photo-${photoId}`);
-        if (!photoElement) return;
-        
+// ===================== SELECTION =====================
+class Selection {
+    static toggle(photoId) {
+        const el = document.getElementById(`photo-${photoId}`);
+        if (!el) return;
         if (AppState.selectedPhotos.has(photoId)) {
             AppState.selectedPhotos.delete(photoId);
-            photoElement.classList.remove('selected');
+            el.classList.remove('selected');
         } else {
             AppState.selectedPhotos.add(photoId);
-            photoElement.classList.add('selected');
+            el.classList.add('selected');
         }
     }
-    
-    static async submitSelection() {
-        const selectedIds = Array.from(AppState.selectedPhotos);
-        
-        if (selectedIds.length === 0) {
-            AIInteraction.addAIMessage('Please select at least one photo.', 'error');
-            return;
-        }
-        
-        // Send selection to backend
+
+    static async submit() {
+        const ids = Array.from(AppState.selectedPhotos);
+        if (!ids.length) { Chat.addAI('Please select at least one photo.', 'error'); return; }
+
         try {
-            const response = await fetch('/learn/identify', {
+            const res = await fetch('/learn/identify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    photoIds: selectedIds,
-                    context: AppState.currentContext
-                })
+                body: JSON.stringify({ photoIds: ids, context: AppState.currentContext })
             });
-            
-            const data = await response.json();
-            
+            const data = await res.json();
             if (data.success) {
-                AIInteraction.showLearningConfirmation(
-                    data.person,
-                    data.photoCount
-                );
-                
-                // Clear selection area
+                Chat.showLearningConfirmation(data.person, data.photoCount);
                 elements.interactiveArea.innerHTML = '';
                 AppState.selectedPhotos.clear();
-                
-                // If album creation was requested, create it
-                if (data.createAlbum) {
-                    createAlbum();
-                }
-                
-                // Speak confirmation
-                if (voiceIntegration) {
-                    voiceIntegration.speak(`I've learned to recognize your ${data.person}. Found ${data.photoCount} photos.`);
-                }
+                if (data.createAlbum) createAlbum();
+                if (voiceIntegration) voiceIntegration.speak(`Learned to recognize your ${data.person}.`);
             }
-        } catch (error) {
-            console.error('Error submitting selection:', error);
-            AIInteraction.addAIMessage('Error saving your selection. Please try again.', 'error');
+        } catch(err) {
+            Chat.addAI('Error saving selection. Try again.', 'error');
         }
     }
 }
 
-// ==================== SEARCH FUNCTION ====================
+// ===================== SEARCH =====================
 async function searchImages(query) {
-    const searchText = query || elements.searchInput.value;
-    if (!searchText) return;
-    
-    // Show loading
+    const text = query || elements.searchInput.value;
+    if (!text?.trim()) return;
+
+    goToResults();
+    elements.searchInputResults.value = text;
+
     elements.loadingDiv.classList.remove('hidden');
     elements.resultDiv.innerHTML = '';
-    
-    // Clear previous AI messages but keep reasoning
-    AIInteraction.clearChat();
-    AIInteraction.clearInteractive();
-    
-    // Add user message
-    AIInteraction.addAIMessage(`You: "${searchText}"`, 'info');
-    
+    Chat.clear();
+    Chat.addUser(text);
+
     try {
-        const response = await fetch('/search', {
+        const res = await fetch('/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                query: searchText,
-                context: AppState.conversationHistory
-            })
+            body: JSON.stringify({ query: text, context: AppState.conversationHistory })
         });
-        
-        const data = await response.json();
-        
-        // Show AI's reasoning if provided
-        if (data.reasoning) {
-            AIInteraction.showReasoning(data.reasoning);
-        }
-        
-        // Handle AI questions (needs user input)
+        const data = await res.json();
+
+        if (data.reasoning) Chat.showReasoning(data.reasoning);
+
         if (data.needsInput) {
             if (data.type === 'identify_person') {
-                AIInteraction.showIdentificationGrid(
-                    data.candidatePhotos,
-                    data.question
-                );
+                Chat.showIdentificationGrid(data.candidatePhotos, data.question);
                 AppState.currentContext = data.context;
             } else {
-                AIInteraction.addAIMessage(data.question, 'question');
+                Chat.addAI(data.question, 'question');
             }
-            
-            // Speak the question
-            if (voiceIntegration) {
-                voiceIntegration.speak(data.question);
-            }
+            if (voiceIntegration) voiceIntegration.speak(data.question);
             return;
         }
-        
-        // Handle results
+
         if (data.results) {
             displayResults(data.results);
-            
-            // Voice feedback
-            const voiceResponse = data.voice_response || 
-                `Found ${data.results.count} photos. ${data.results.title}`;
-            
-            if (voiceIntegration) {
-                voiceIntegration.speak(voiceResponse);
-            }
-            
-            // If AI learned something
-            if (data.learned) {
-                AIInteraction.showLearningConfirmation(
-                    data.learned.person,
-                    data.learned.count
-                );
-            }
+            const msg = data.voice_response || `Found ${data.results.count} photos.`;
+            Chat.addAI(msg, 'success');
+            if (voiceIntegration) voiceIntegration.speak(msg);
+            if (data.learned) Chat.showLearningConfirmation(data.learned.person, data.learned.count);
         }
-        
-        // Save to conversation history
-        AppState.conversationHistory.push({
-            query: searchText,
-            response: data
-        });
-        
-    } catch (error) {
-        console.error('Error:', error);
-        AIInteraction.addAIMessage('Error searching photos. Please try again.', 'error');
-        elements.resultDiv.innerHTML = '<p class="error">Error searching photos</p>';
+
+        AppState.conversationHistory.push({ query: text, response: data });
+
+    } catch(err) {
+        console.error('Search error:', err);
+        Chat.addAI('Error searching photos. Please try again.', 'error');
     } finally {
         elements.loadingDiv.classList.add('hidden');
     }
 }
 
-// ==================== DISPLAY RESULTS ====================
+function searchFromResults() {
+    const text = elements.searchInputResults.value;
+    if (!text?.trim()) return;
+    elements.searchInput.value = text;
+    searchImages(text);
+}
+
+// ===================== DISPLAY RESULTS =====================
 function displayResults(data) {
-    let html = `<h2>${data.title} (${data.count} photos)</h2>`;
-    
-    if (data.images && data.images.length > 0) {
-        html += '<div class="album-grid">';
-        data.images.forEach(img => {
-            html += `
-                <div class="album-card" onclick="viewPhoto('${img.id}')">
-                    <img src="${img.url || '/static/samples/placeholder.jpg'}" 
-                         alt="${img.tags || 'Photo'}">
-                    <div class="album-content">
-                        <div class="album-title">${img.title || 'Photo'}</div>
-                        <div class="album-meta">
-                            ${img.date || ''} ${img.location ? '• ' + img.location : ''}
-                        </div>
-                        <div class="album-tags">
-                            ${(img.tags || []).map(tag => 
-                                `<span class="tag">${tag}</span>`
-                            ).join('')}
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-        html += '</div>';
-    } else {
-        html += '<p>No photos found. Try a different search.</p>';
+    if (elements.photosLabel) {
+        elements.photosLabel.textContent = data.title || 'Photo Results';
     }
-    
+
+    if (!data.images?.length) {
+        elements.resultDiv.innerHTML = '<p class="no-results">No photos found. Try a different search.</p>';
+        return;
+    }
+
+    let html = `<p class="results-title">${data.count} photos</p><div class="album-grid">`;
+    data.images.forEach(img => {
+        const url = img.url || '/static/samples/placeholder.jpg';
+        html += `
+            <div class="album-card" onclick="openLightbox('${url}')">
+                <img src="${encodeURI(url)}" alt="Photo" loading="lazy">
+                <div class="album-content">
+                    <div class="album-meta">${img.date || ''} ${img.location ? '· ' + img.location : ''}</div>
+                </div>
+            </div>
+        `;
+    });
+    html += '</div>';
     elements.resultDiv.innerHTML = html;
 }
 
-// ==================== DARK MODE ====================
-function toggleTheme() {
-    document.body.classList.toggle('dark-mode');
-    AppState.darkMode = !AppState.darkMode;
-    elements.themeToggle.textContent = AppState.darkMode ? '☀️ Light Mode' : '🌓 Dark Mode';
-}
+// ===================== MISC ACTIONS =====================
+function viewPhoto(id) { console.log('View photo:', id); }
 
-// ==================== VIEW PHOTO ====================
-function viewPhoto(photoId) {
-    console.log('View photo:', photoId);
-    // Could implement lightbox or full view
-}
-
-// ==================== CREATE ALBUM ====================
 async function createAlbum() {
     if (!AppState.currentContext) return;
-    
     try {
-        const response = await fetch('/create-album', {
+        const res = await fetch('/create-album', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(AppState.currentContext)
         });
-        
-        const data = await response.json();
-        
+        const data = await res.json();
         if (data.success) {
-            AIInteraction.addAIMessage(
-                `✅ Created album "${data.albumTitle}" with ${data.photoCount} photos!`,
-                'success'
-            );
-            
-            if (voiceIntegration) {
-                voiceIntegration.speak(`Created album ${data.albumTitle} with ${data.photoCount} photos.`);
-            }
-            
-            if (data.album) {
-                displayResults(data.album);
-            }
+            Chat.addAI(`Created album "${data.albumTitle}" with ${data.photoCount} photos!`, 'success');
+            if (voiceIntegration) voiceIntegration.speak(`Created album ${data.albumTitle}.`);
+            if (data.album) displayResults(data.album);
         }
-    } catch (error) {
-        console.error('Error creating album:', error);
-        AIInteraction.addAIMessage('Error creating album.', 'error');
-    }
+    } catch(err) { Chat.addAI('Error creating album.', 'error'); }
 }
 
-// ==================== FIND MORE PHOTOS ====================
 async function findMorePhotos() {
     if (!AppState.currentContext) return;
-    
     try {
-        const response = await fetch('/find-similar', {
+        const res = await fetch('/find-similar', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(AppState.currentContext)
         });
-        
-        const data = await response.json();
-        
-        if (data.photos && data.photos.length > 0) {
-            AIInteraction.addAIMessage(
-                `Found ${data.photos.length} more photos!`,
-                'success'
-            );
-            
-            if (voiceIntegration) {
-                voiceIntegration.speak(`Found ${data.photos.length} more photos.`);
-            }
+        const data = await res.json();
+        if (data.photos?.length) {
+            Chat.addAI(`Found ${data.photos.length} more photos!`, 'success');
+            if (voiceIntegration) voiceIntegration.speak(`Found ${data.photos.length} more photos.`);
         }
-    } catch (error) {
-        console.error('Error finding more photos:', error);
-    }
+    } catch(err) { console.error('Error finding photos'); }
 }
 
-// ==================== INITIALIZATION ====================
-document.addEventListener('DOMContentLoaded', () => {
-    // Initialize voice integration
-    voiceIntegration = new VoiceIntegration();
-    voiceProcessor = new VoiceCommandProcessor();
-    
-    // Set up voice callbacks
+// ===================== THEME =====================
+function toggleTheme() {
+    AppState.darkMode = !AppState.darkMode;
+    applyTheme();
+}
+
+function applyTheme() {
+    document.body.classList.toggle('dark-mode', AppState.darkMode);
+    document.body.classList.toggle('light-mode', !AppState.darkMode);
+    localStorage.setItem('vocallens-theme', AppState.darkMode ? 'dark' : 'light');
+}
+
+function loadTheme() {
+    const saved = localStorage.getItem('vocallens-theme');
+    AppState.darkMode = saved === 'dark';
+    applyTheme();
+}
+
+// ===================== VOICE SETUP =====================
+function setupVoice(micBtn, onResult) {
+    if (!voiceIntegration) return;
+    activeMicBtn = micBtn;
+
+    micBtn.addEventListener('click', () => voiceIntegration.startListening());
+
     voiceIntegration.onListeningStarted = () => {
-        elements.micBtn.classList.add('listening');
-        AIInteraction.addAIMessage('🎤 Listening... Speak your command', 'info');
+        micBtn.classList.add('listening');
     };
-    
     voiceIntegration.onListeningEnded = () => {
-        elements.micBtn.classList.remove('listening');
+        micBtn.classList.remove('listening');
     };
-    
     voiceIntegration.onVoiceResult = (result) => {
         const processed = voiceProcessor.processVoiceInput(result.transcript);
-        
-        AIInteraction.addAIMessage(
-            `I heard: "${result.transcript}" (confidence: ${Math.round(result.confidence * 100)}%)`,
-            'success'
-        );
-        
-        elements.searchInput.value = processed.query;
-        searchImages(processed.query);
+        onResult(processed.query);
     };
-    
     voiceIntegration.onVoiceError = (error) => {
-        elements.micBtn.classList.remove('listening');
-        
-        let message = 'Voice recognition error. ';
-        switch(error) {
-            case 'not-allowed':
-                message += 'Please allow microphone access in your browser.';
-                break;
-            case 'no-speech':
-                message += 'No speech detected. Please try again.';
-                break;
-            case 'audio-capture':
-                message += 'No microphone found. Please check your microphone.';
-                break;
-            case 'network':
-                message += 'Network error. Please check your connection.';
-                break;
-            case 'not-supported':
-                message += 'Voice recognition is not supported in this browser. Try Chrome or Edge.';
-                elements.micBtn.classList.add('disabled');
-                elements.micBtn.disabled = true;
-                break;
-            default:
-                message += 'Please try again or type your query.';
-        }
-        AIInteraction.addAIMessage(message, 'error');
+        micBtn.classList.remove('listening');
+        const msgs = {
+            'not-allowed': 'Allow microphone access and try again.',
+            'no-speech': 'No speech detected. Try again.',
+            'audio-capture': 'No microphone found.',
+            'network': 'Network error.',
+            'not-supported': 'Voice not supported. Try Chrome.'
+        };
+        const msg = msgs[error] || 'Voice error. Please try again.';
+        if (elements.aiChatBox) Chat.addAI(msg, 'error');
+        if (error === 'not-supported') { micBtn.disabled = true; micBtn.classList.add('disabled'); }
     };
-    
     voiceIntegration.onNoMatch = () => {
-        elements.micBtn.classList.remove('listening');
-        AIInteraction.addAIMessage("I didn't catch that. Please try again.", 'question');
+        micBtn.classList.remove('listening');
+        if (elements.aiChatBox) Chat.addAI("Didn't catch that. Try again.", 'question');
     };
-    
-    voiceIntegration.onSpeechStarted = () => {
-        console.log('Speaking started');
-    };
-    
-    voiceIntegration.onSpeechEnded = () => {
-        console.log('Speaking ended');
-    };
-    
-    voiceIntegration.onSpeechError = (error) => {
-        console.error('Speech error:', error);
-    };
+}
 
-    elements.micBtn.addEventListener('click', () => {
-    voiceIntegration.startListening();
-});
-    
-    // Event listeners
+// ===================== INIT =====================
+document.addEventListener('DOMContentLoaded', () => {
+    loadTheme();
+    voiceIntegration = new VoiceIntegration();
+    voiceProcessor = new VoiceCommandProcessor();
+
+    setupVoice(elements.micBtn, (query) => {
+        elements.searchInput.value = query;
+        searchImages(query);
+    });
+
+    elements.micBtnResults.addEventListener('click', () => {
+        activeMicBtn = elements.micBtnResults;
+        voiceIntegration.onListeningStarted = () => elements.micBtnResults.classList.add('listening');
+        voiceIntegration.onListeningEnded = () => elements.micBtnResults.classList.remove('listening');
+        voiceIntegration.onVoiceResult = (result) => {
+            const processed = voiceProcessor.processVoiceInput(result.transcript);
+            elements.searchInputResults.value = processed.query;
+            searchImages(processed.query);
+        };
+        voiceIntegration.startListening();
+    });
+
     elements.searchBtn.addEventListener('click', () => searchImages());
     elements.themeToggle.addEventListener('click', toggleTheme);
-    
-    elements.searchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') searchImages();
-    });
-    
-    // Welcome message
-    setTimeout(() => {
-        AIInteraction.addAIMessage(
-            "👋 Hi! I'm Vocal Lens. I can understand natural language and learn from you. " +
-            "Try asking: 'Show me my sister's wedding photos' or 'Find pictures from Goa trip'",
-            'info'
-        );
-        
-        // Voice welcome
-        if (voiceIntegration && voiceIntegration.voiceSupported) {
-            voiceIntegration.speak(
-                "Hello! I'm Vocal Lens. I can understand natural language and learn from you. " +
-                "Try asking: show me my sister's wedding photos",
-                { rate: 0.85 }
-            );
-        }
-    }, 1000);
+    elements.searchInput.addEventListener('keypress', e => { if (e.key === 'Enter') searchImages(); });
+    elements.searchInputResults.addEventListener('keypress', e => { if (e.key === 'Enter') searchFromResults(); });
 });
 
-// Export functions for HTML onclick handlers
+// Expose globals
 window.searchImages = searchImages;
+window.searchFromResults = searchFromResults;
+window.goBack = goBack;
+window.useHint = useHint;
 window.toggleTheme = toggleTheme;
-window.AISelection = AISelection;
+window.Selection = Selection;
 window.createAlbum = createAlbum;
 window.findMorePhotos = findMorePhotos;
 window.viewPhoto = viewPhoto;
+window.openLightbox = openLightbox;

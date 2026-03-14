@@ -3,44 +3,125 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vocal Lens - AI Photo Organizer</title>
+    <title>VocalLens - AI Photo Organizer</title>
+    <link href="https://api.fontshare.com/v2/css?f[]=clash-display@400,500,600,700&f[]=satoshi@300,400,500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body>
-    <div class="container">
-        <header>
-            <div class="logo">🎤 Vocal Lens</div>
-            <div class="voice-controls">
-                <button class="mic-btn" id="micBtn" title="Click and speak your command">🎤</button>
-                <input type="text" id="searchInput" placeholder="Ask me anything... e.g., 'Show me my sister's wedding photos'">
-                <button id="searchBtn">Search</button>
-                <button id="themeToggle">🌓 Dark Mode</button>
+<body class="light-mode">
+
+    <!-- THEME TOGGLE -->
+    <button id="themeToggle" class="theme-toggle" title="Toggle theme">
+        <span class="theme-icon">◐</span>
+    </button>
+
+    <!-- ===================== LANDING PAGE ===================== -->
+    <div id="landingPage" class="page landing-page">
+        <div class="landing-bg">
+            <div class="bg-photo bg-photo-1"></div>
+            <div class="bg-photo bg-photo-2"></div>
+            <div class="bg-photo bg-photo-3"></div>
+            <div class="bg-overlay"></div>
+        </div>
+
+        <div class="landing-content">
+            <div class="landing-header">
+                <div class="logo-mark">VL</div>
+                <h1 class="logo-title">
+                    <span class="logo-letter n1">V</span><span class="logo-letter n2">o</span><span class="logo-letter n3">c</span><span class="logo-letter n4">a</span><span class="logo-letter n5">l</span><span class="logo-space"> </span><span class="logo-letter n6">L</span><span class="logo-letter n7">e</span><span class="logo-letter n8">n</span><span class="logo-letter n9">s</span>
+                </h1>
+                <p class="logo-tagline">Your memories, found by voice</p>
             </div>
-        </header>
 
-        <!-- AI Chat Box - Shows AI's messages and questions -->
-        <div class="ai-chat-box" id="aiChatBox"></div>
-
-        <!-- AI Reasoning Panel - Shows AI's thinking process -->
-        <div class="ai-reasoning hidden" id="aiReasoning">
-            <h3>🧠 AI Thinking:</h3>
+            <div class="search-hero">
+                <div class="search-bar-wrapper">
+                    <button class="mic-btn" id="micBtn" title="Speak your query">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                            <line x1="12" y1="19" x2="12" y2="23"/>
+                            <line x1="8" y1="23" x2="16" y2="23"/>
+                        </svg>
+                    </button>
+                    <input type="text" id="searchInput" 
+                           placeholder="Try: show me photos from Goa last summer..."
+                           autocomplete="off">
+                    <button id="searchBtn" class="search-btn">Search</button>
+                </div>
+                <div class="search-hints">
+                    <span class="hint" onclick="useHint(this)">"Show my sister's wedding photos"</span>
+                    <span class="hint" onclick="useHint(this)">"Find beach photos from 2023"</span>
+                    <span class="hint" onclick="useHint(this)">"Photos with grandparents"</span>
+                </div>
+            </div>
         </div>
-
-        <!-- Interactive Area - For photo selection, confirmation etc -->
-        <div id="interactiveArea"></div>
-
-        <!-- Loading Spinner -->
-        <div id="loading" class="loading hidden">
-            <div class="spinner"></div>
-        </div>
-
-        <!-- Results Area -->
-        <div id="result"></div>
     </div>
 
-    <!-- Voice Integration Script - MUST LOAD FIRST -->
-    <script src="/static/js/voice-integration.js"></script>
-    <!-- Main Application Script -->
+    <!-- ===================== RESULTS PAGE ===================== -->
+    <div id="resultsPage" class="page results-page hidden">
+        <div class="results-header">
+            <button class="back-btn" onclick="goBack()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                </svg>
+                Back
+            </button>
+            <div class="results-logo">VocalLens</div>
+            <div class="results-search-bar">
+                <button class="mic-btn-sm" id="micBtnResults">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="23"/>
+                        <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                </button>
+                <input type="text" id="searchInputResults" placeholder="Search again...">
+                <button onclick="searchFromResults()" class="search-btn-sm">Go</button>
+            </div>
+        </div>
+
+        <div class="results-body">
+            <!-- LEFT: Chat Panel -->
+            <div class="chat-panel">
+                <div class="chat-label">AI Assistant</div>
+                <div id="aiChatBox" class="chat-messages"></div>
+
+                <!-- AI Reasoning -->
+                <div id="aiReasoning" class="ai-reasoning hidden"></div>
+
+                <!-- Interactive Area -->
+                <div id="interactiveArea" class="interactive-area"></div>
+
+                <!-- Loading -->
+                <div id="loading" class="loading hidden">
+                    <div class="dot-pulse">
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT: Photo Results -->
+            <div class="photos-panel">
+                <div class="photos-label" id="photosLabel">Photo Results</div>
+                <div id="result" class="photo-grid-container">
+                    <div class="empty-state">
+                        <div class="empty-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                <circle cx="8.5" cy="8.5" r="1.5"/>
+                                <path d="M21 15l-5-5L5 21"/>
+                            </svg>
+                        </div>
+                        <p>Your photos will appear here</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/voice_integration.js"></script>
     <script src="/static/js/script.js"></script>
 </body>
 </html>
