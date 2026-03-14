@@ -12,6 +12,42 @@ from agents.orchestrator import OrchestratorAgent
 from agents.vision_agent import VisionAgent
 from agents.memory_agent import MemoryAgent
 
+
+# Add this near the top of main.py after imports
+import sqlite3
+import os
+
+print("=" * 50)
+print("🔍 VOCAL LENS STARTUP DIAGNOSTIC")
+print("=" * 50)
+
+# Check samples folder
+samples_path = "static/samples"
+print(f"\n📁 Samples folder: {samples_path}")
+print(f"   Exists: {os.path.exists(samples_path)}")
+
+if os.path.exists(samples_path):
+    # Count images
+    image_count = 0
+    for root, dirs, files in os.walk(samples_path):
+        images = [f for f in files if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        image_count += len(images)
+        if images:
+            print(f"   📸 {os.path.basename(root)}: {len(images)} images")
+    print(f"\n📊 TOTAL IMAGES FOUND: {image_count}")
+
+# Check database
+if os.path.exists('database.db'):
+    conn = sqlite3.connect('database.db')
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM images")
+    db_count = c.fetchone()[0]
+    print(f"\n🗄️ Database records: {db_count} images")
+    conn.close()
+else:
+    print("\n❌ database.db not found!")
+print("=" * 50)
+
 app = Flask(__name__)
 orchestrator = OrchestratorAgent()
 vision = VisionAgent()
